@@ -64,95 +64,6 @@ void double_to_si(double value, char *si_str, size_t max_len) {
     snprintf(si_str, max_len, "%g", value);
 }
 
-/* Function to check and prepend string if pattern is not matched */
-int check_and_prepend(char **buffer, long *length, const char *pattern, const char *prepend_str) {
-    regex_t regex;
-    regcomp(&regex, pattern, REG_EXTENDED | REG_NOSUB | REG_NEWLINE);
-    if (regexec(&regex, (const char *)*buffer, 0, NULL, 0) != 0) { /* No match */
-        size_t prepend_length = strlen(prepend_str);
-        size_t new_length = prepend_length + *length;
-        char *new_buffer = (char *)malloc(new_length);
-        if (!new_buffer) {
-            regfree(&regex);
-            return 0; /* Memory allocation failed */
-        }
-        memcpy(new_buffer, prepend_str, prepend_length);
-        memcpy(new_buffer + prepend_length, *buffer, *length);
-        free(*buffer);
-        *buffer = new_buffer;
-        *length = new_length;
-    }
-    regfree(&regex);
-    return 1; /* Success */
-}
-
-#if 0
-/* Function to replace substrings in a dynamic buffer */
-void replace_substrings(char **buffer, const char *patterns[], size_t num_patterns, size_t *buffer_size) {
-    size_t original_len = strlen(*buffer);
-    size_t tmp_buffer_size = original_len + 1; /* Include space for null terminator */
-    char *result = malloc(tmp_buffer_size);
-    if (!result) {
-        fprintf(stderr, "Memory allocation failed\n");
-        return;
-    }
-    memset(result, 0, tmp_buffer_size);
-
-    char *original = *buffer;
-    char *temp = result;
-    size_t used = 0;
-
-    while (*original) {
-        int replaced = 0;
-        for (size_t i = 0; i < num_patterns; i += 2) {
-            size_t len = strlen(patterns[i]);
-            if (strncmp(original, patterns[i], len) == 0) {
-                size_t replacement_len = strlen(patterns[i + 1]);
-                if (used + replacement_len >= tmp_buffer_size) {
-                    /* Resize buffer if needed */
-                    tmp_buffer_size = tmp_buffer_size + replacement_len + original_len;
-                    char *new_result = realloc(result, tmp_buffer_size);
-                    if (!new_result) {
-                        fprintf(stderr, "Memory allocation failed\n");
-                        free(result);
-                        return;
-                    }
-                    result = new_result;
-                    temp = result + used; /* Reset temp to new position */
-                }
-                strcpy(temp, patterns[i + 1]);
-                original += len;
-                temp += replacement_len;
-                used += replacement_len;
-                replaced = 1;
-                break;
-            }
-        }
-        if (!replaced) {
-            if (used + 1 >= tmp_buffer_size) {
-                /* Resize buffer if needed */
-                tmp_buffer_size = tmp_buffer_size + 1 + original_len;
-                char *new_result = realloc(result, tmp_buffer_size);
-                if (!new_result) {
-                    fprintf(stderr, "Memory allocation failed\n");
-                    free(result);
-                    return;
-                }
-                result = new_result;
-                temp = result + used; /* Reset temp to new position */
-            }
-            *temp++ = *original++;
-            used++;
-        }
-    }
-    *temp = '\0';
-    free(*buffer);
-    result[used] = '\0'; /* Null-terminate the result */
-    *buffer = result;
-    *buffer_size = used;
-}
-#endif
-
 /* Structure for a node in the linked list */
 struct line_node {
     char *line;              /* Pointer to the string */
@@ -252,6 +163,43 @@ char *join_lines(struct line_node *head, size_t *buffer_size) {
     *buffer_size = total_length;  /* Update buffer size */
 
     return buffer;
+}
+
+/* Function to insert a new line at the beginning of the list */
+void prepend_line(struct line_node **head, const char *new_line) {
+    struct line_node *new_node = (struct line_node *)malloc(sizeof(struct line_node));
+    if (!new_node) {
+        fprintf(stderr, "Memory allocation failed\n");
+        exit(1); /* Exit if memory allocation fails */
+    }
+    new_node->line = strdup(new_line);  /* Duplicate the string */
+    new_node->next = *head;
+    *head = new_node;
+}
+
+/* Function to check each line and prepend if pattern is not matched */
+void check_and_prepend(struct line_node **head, const char *pattern, const char *prepend_str) {
+    regex_t regex;
+    int prepend_needed = 1;
+    struct line_node *current = *head;
+
+    regcomp(&regex, pattern, REG_EXTENDED | REG_NOSUB | REG_NEWLINE);
+
+    /* Check each line for the pattern */
+    while (current) {
+        if (regexec(&regex, current->line, 0, NULL, 0) == 0) { /* Match found */
+            prepend_needed = 0;
+            break;
+        }
+        current = current->next;
+    }
+
+    /* Prepend if no lines match the pattern */
+    if (prepend_needed) {
+        prepend_line(head, prepend_str);
+    }
+
+    regfree(&regex);
 }
 
 /* Helper function to replace all occurrences of a pattern in a string */
@@ -459,6 +407,9 @@ int main() {
 
     /* Read the file into the buffer */
     fread(buffer, 1, length, f);
+    size_t line_count;
+    struct line_node *head = split_buffer(buffer, &line_count);
+    free(buffer);  /* Free the buffer */
 
     /* Prepend param information */
     do {
@@ -466,46 +417,27 @@ int main() {
             "\n"
             "************************************************************************\n"
             "* CDL netlist\n"
-            "************************************************************************\n"
-            "\n";
-        size_t header_length = strlen(header);
-        size_t new_length = header_length + length;
-        char *new_buffer = (char *)malloc((new_length+1)*sizeof(char));
-        if (!new_buffer) {
-            fprintf(stderr, "Failed to allocate memory for new buffer\n");
-            free(buffer);
-            return 1;
-        }
-        memset(new_buffer, 0, new_length);
-        memcpy(new_buffer, header, header_length);
-        memcpy(new_buffer + header_length, buffer, length);
-        free(buffer);
-        buffer = new_buffer;
-        length = new_length;
-        buffer[length] = '\0'; /* Null-terminate the buffer */
+            "************************************************************************\n";
+
+        prepend_line(&head, header);
     }
     while (0);
 
     /* Define patterns and corresponding strings to prepend, in reverse order */
     const char *patterns[] = {
-        "^\\.PARAM.*\n", ".PARAM\n",
-        "^\\*\\.MEGA.*\n", "*.MEGA\n",
-        "^\\*\\.EQUATION.*\n", "*.EQUATION\n",
-        "^\\*\\.DIOAREA.*\n", "*.DIOAREA\n",
-        "^\\*\\.DIOPERI.*\n", "*.DIOPERI\n",
-        "^\\*\\.CAPVAL.*\n", "*.CAPVAL\n",
-        "^\\*\\.RESVAL.*\n", "*.RESVAL\n",
-        "^\\*\\.BIPOLAR.*\n", "*.BIPOLAR\n"
+        "^\\.PARAM.*\n", ".PARAM",
+        "^\\*\\.MEGA.*\n", "*.MEGA",
+        "^\\*\\.EQUATION.*\n", "*.EQUATION",
+        "^\\*\\.DIOAREA.*\n", "*.DIOAREA",
+        "^\\*\\.DIOPERI.*\n", "*.DIOPERI",
+        "^\\*\\.CAPVAL.*\n", "*.CAPVAL",
+        "^\\*\\.RESVAL.*\n", "*.RESVAL",
+        "^\\*\\.BIPOLAR.*\n", "*.BIPOLA",
     };
-    size_t num_patterns = sizeof(patterns) / sizeof(patterns[0]);
 
     /* Check and prepend strings if necessary */
-    for (size_t i = 0; i < num_patterns; i += 2) {
-        if (!check_and_prepend(&buffer, &length, patterns[i], patterns[i + 1])) {
-            fprintf(stderr, "Failed to allocate memory for new buffer\n");
-            free(buffer);
-            return 1;
-        }
+    for (size_t i = 0; i < sizeof(patterns) / sizeof(patterns[0]); i += 2) {
+        check_and_prepend(&head, patterns[i], patterns[i + 1]);
     }
 
     /* Prepend header information */
@@ -516,23 +448,8 @@ int main() {
             "* Author: Huang Rui <vowstar@gmail.com>\n"
             "\n"
             "* CDL parameter\n"
-            "************************************************************************\n"
-            "\n";
-        size_t header_length = strlen(header);
-        size_t new_length = header_length + length;
-        char *new_buffer = (char *)malloc(new_length);
-        if (!new_buffer) {
-            fprintf(stderr, "Failed to allocate memory for new buffer\n");
-            free(buffer);
-            return 1;
-        }
-        memset(new_buffer, 0, new_length);
-        memcpy(new_buffer, header, header_length);
-        memcpy(new_buffer + header_length, buffer, length);
-        free(buffer);
-        buffer = new_buffer;
-        length = new_length;
-        buffer[length] = '\0'; /* Null-terminate the buffer */
+            "************************************************************************\n";
+        prepend_line(&head, header);
     }
     while (0);
 
@@ -549,10 +466,6 @@ int main() {
         " FINGERS=", " fingers=",
     };
 
-    /* Replace substrings in the buffer */
-    size_t line_count;
-    struct line_node *head = split_buffer(buffer, &line_count);
-    free(buffer);
     /* Replace substrings in the linked list */
     replace_substrings(head, cdl_patterns, sizeof(cdl_patterns) / sizeof(cdl_patterns[0]));
     /* Process the buffer to calculate cdl parameters */
