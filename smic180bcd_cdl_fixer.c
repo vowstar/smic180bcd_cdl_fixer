@@ -151,139 +151,143 @@ void replace_substrings(char **buffer, const char *patterns[], size_t num_patter
     *buffer_size = used;
 }
 
-/* Function to split buffer into an array of strings */
-char **split_buffer(const char *buffer, size_t *line_count) {
-    /* Count the number of lines in the buffer */
-    *line_count = 0;
-    const char *ptr = buffer;
-    while (*ptr) {
-        if (*ptr == '\n') {
-            (*line_count)++;
-        }
-        ptr++;
+/* Structure for a node in the linked list */
+struct line_node {
+    char *line;              /* Pointer to the string */
+    struct line_node *next;  /* Pointer to the next node */
+};
+
+/* Function to free the memory allocated for the linked list */
+void free_lines(struct line_node *head) {
+    while (head) {
+        struct line_node *temp = head;
+        head = head->next;
+        free(temp->line);  /* Free the string */
+        free(temp);        /* Free the node */
     }
-    if (*(ptr - 1) != '\n') {
-        (*line_count)++;
+}
+
+/* Function to split buffer into a linked list of strings */
+struct line_node *split_buffer(const char *buffer, size_t *line_count) {
+    *line_count = 0;  /* Initialize line count */
+    if (!buffer || !*buffer) {
+        return NULL;  /* Return NULL for empty buffer */
     }
 
-    /* Allocate memory for the array of strings */
-    char **lines = (char **)malloc(*line_count * sizeof(char *));
-    if (!lines) {
-        fprintf(stderr, "Memory allocation failed\n");
-        exit(1);
-    }
-    memset(lines, 0, *line_count * sizeof(char *));
+    struct line_node *head = NULL, *current = NULL;
 
-    /* Split the buffer into lines */
-    size_t line_index = 0;
-    ptr = buffer;
-    const char *line_start = ptr;
-    while (*ptr) {
-        if (*ptr == '\n') {
-            size_t line_length = ptr - line_start;
-            lines[line_index] = (char *)malloc((line_length + 1) * sizeof(char));
-            if (!lines[line_index]) {
+    /* Iterate over the buffer to split it into lines */
+    const char *start = buffer;
+    while (1) {
+        const char *end = strchr(start, '\n');  /* Find the end of the current line */
+        size_t len = (end ? end - start : strlen(start));  /* Compute line length */
+
+        if (len > 0) {  /* Check if line has content */
+            /* Allocate memory for the new node */
+            struct line_node *new_node = malloc(sizeof(struct line_node));
+            if (!new_node) {
+                free_lines(head);  /* Free previously allocated nodes */
                 fprintf(stderr, "Memory allocation failed\n");
-                exit(1);
+                return NULL;
             }
-            memset(lines[line_index], 0, line_length + 1);
-            strncpy(lines[line_index], line_start, line_length);
-            lines[line_index][line_length] = '\0';  /* Null-terminate the string */
-            line_start = ptr + 1;
-            line_index++;
-        }
-        ptr++;
-    }
-    if (line_start != ptr) {  /* If the buffer doesn't end with a newline */
-        size_t line_length = ptr - line_start;
-        lines[line_index] = (char *)malloc((line_length + 1) * sizeof(char));
-        if (!lines[line_index]) {
-            fprintf(stderr, "Memory allocation failed\n");
-            exit(1);
-        }
-        memset(lines[line_index], 0, line_length + 1);
-        strncpy(lines[line_index], line_start, line_length);
-        lines[line_index][line_length] = '\0';  /* Null-terminate the string */
-    }
 
-    return lines;
+            /* Allocate memory for the line */
+            new_node->line = malloc(len + 1);
+            if (!new_node->line) {
+                free(new_node);
+                free_lines(head);
+                fprintf(stderr, "Memory allocation failed\n");
+                return NULL;
+            }
+
+            /* Copy the line into the new node */
+            strncpy(new_node->line, start, len);
+            new_node->line[len] = '\0';  /* Null-terminate the string */
+            new_node->next = NULL;
+
+            /* Link the new node into the list */
+            if (current) {
+                current->next = new_node;
+            } else {
+                head = new_node;
+            }
+            current = new_node;
+            (*line_count)++;  /* Increment line count */
+        }
+        if (!end) break;  /* Exit loop if no more lines */
+        start = end + 1;  /* Move to the start of the next line */
+    }
+    return head;
 }
 
-/* Function to free the memory allocated for the array of strings */
-void free_lines(char **lines, size_t line_count) {
-    for (size_t i = 0; i < line_count; i++) {
-        free(lines[i]);
+/* Function to join a linked list of strings into a single buffer with newline separators */
+char *join_lines(struct line_node *head, size_t *buffer_size) {
+    *buffer_size = 0;
+    if (!head) {
+        return NULL;  /* Return NULL for empty list */
     }
-    free(lines);
-}
 
-/* Function to join an array of strings into a single buffer with newline separators */
-char *join_lines(char **lines, size_t line_count, size_t *buffer_size) {
+    /* Calculate the total length of the joined string */
     size_t total_length = 0;
-
-    /* Calculate total length including newline characters */
-    for (size_t i = 0; i < line_count; i++) {
-        total_length += strlen(lines[i]);
-        total_length++;  /* Account for newline character */
+    for (struct line_node *current = head; current; current = current->next) {
+        total_length += strlen(current->line) + 1;  /* Include space for newline */
     }
 
-    /* Allocate memory for the buffer */
-    char *buffer = (char *)malloc((total_length + 1) * sizeof(char));  /* Add space for null terminator */
+    /* Allocate memory for the combined buffer */
+    char *buffer = malloc(total_length + 1);  /* Add space for null terminator */
     if (!buffer) {
         fprintf(stderr, "Memory allocation failed\n");
-        exit(1);
-    }
-    memset(buffer, 0, total_length + 1);
-
-    /* Copy lines into buffer with newline separators */
-    size_t buffer_index = 0;
-    for (size_t i = 0; i < line_count; i++) {
-        strcpy(buffer + buffer_index, lines[i]);
-        buffer_index += strlen(lines[i]);
-        buffer[buffer_index] = '\n';  /* Add newline character */
-        buffer_index++;
+        return NULL;
     }
 
-    buffer[buffer_index] = '\0';  /* Null-terminate the buffer */
-    *buffer_size = strlen(buffer);
+    /* Copy lines into the buffer and add newline characters */
+    char *ptr = buffer;
+    for (struct line_node *current = head; current; current = current->next) {
+        ptr = stpcpy(ptr, current->line);  /* Copy line to buffer */
+        *ptr++ = '\n';  /* Add newline character */
+    }
+    *ptr = '\0';  /* Null-terminate the buffer */
+    *buffer_size = total_length;  /* Update buffer size */
 
     return buffer;
 }
 
-/* Function to process each line of the buffer to calculate fw=w*l or
-   fw=w/fingers and append it to the line */
+/* Function to process each line of the buffer */
 void process_buffer(char **buffer_ptr, size_t *buffer_size) {
-    regex_t regex_w, regex_l, regex_fingers;
+    regex_t regex_w, regex_l, regex_fingers, regex_area, regex_pj;
     regcomp(&regex_w, "w=([0-9]+\\.?[0-9]*[a-zA-Z]+)", REG_EXTENDED);
     regcomp(&regex_l, "l=([0-9]+\\.?[0-9]*[a-zA-Z]+)", REG_EXTENDED);
     regcomp(&regex_fingers, "fingers=([0-9]+\\.?[0-9]*[a-zA-Z]*)", REG_EXTENDED);
-
-    regex_t regex_area, regex_pj;
     regcomp(&regex_area, "area=([0-9]+\\.?[0-9]*[a-zA-Z]+)", REG_EXTENDED);
     regcomp(&regex_pj, "pj=([0-9]+\\.?[0-9]*[a-zA-Z]+)", REG_EXTENDED);
 
     size_t line_count = 0;
-    char **lines = split_buffer(*buffer_ptr, &line_count);
-
-    for (size_t i = 0; i < line_count; i++) {
+    struct line_node *head = split_buffer(*buffer_ptr, &line_count);
+    struct line_node *current = head;
+#if 1
+    while (current) {
         double w = 0.0, l = 0.0, fw, fingers = 1.0;
-        regmatch_t matches[2];
-        char fw_str[100];
+        double area = 0.0, pj = 0.0;
+        char fw_str[100], l_str[100], w_str[100];
         bool w_found = false, l_found = false, fingers_found = false;
+        bool area_found = false, pj_found = false;
 
-        /* Check for 'w' and 'l' values and convert to double */
-        if (regexec(&regex_w, lines[i], 2, matches, 0) == 0) {
-            w = si_to_double(lines[i] + matches[1].rm_so);
+        regmatch_t matches[2];
+
+        /* Check for 'w' value and convert to double */
+        if (regexec(&regex_w, current->line, 2, matches, 0) == 0) {
+            w = si_to_double(current->line + matches[1].rm_so);
             w_found = true;
         }
-        if (regexec(&regex_l, lines[i], 2, matches, 0) == 0) {
-            l = si_to_double(lines[i] + matches[1].rm_so);
+        /* Check for 'l' value and convert to double */
+        if (regexec(&regex_l, current->line, 2, matches, 0) == 0) {
+            l = si_to_double(current->line + matches[1].rm_so);
             l_found = true;
         }
 
         /* Check for 'fingers' value and convert to double */
-        if (regexec(&regex_fingers, lines[i], 2, matches, 0) == 0) {
-            fingers = si_to_double(lines[i] + matches[1].rm_so);
+        if (regexec(&regex_fingers, current->line, 2, matches, 0) == 0) {
+            fingers = si_to_double(current->line + matches[1].rm_so);
             fingers_found = true;
         }
 
@@ -291,41 +295,44 @@ void process_buffer(char **buffer_ptr, size_t *buffer_size) {
         if (w_found && l_found) {
             fw = fingers_found ? (w / fingers) : w;
             double_to_si(fw, fw_str, sizeof(fw_str));
-            /* Temporary buffer for line processing */
-            char *new_line = (char *)malloc((strlen(lines[i]) + sizeof(fw_str) + 1024) * sizeof(char));
-            memset(new_line, 0, strlen(lines[i]) + sizeof(fw_str) + 1024);
-            snprintf(new_line, strlen(lines[i]) + sizeof(fw_str) + 1024, "%s fw=%s", lines[i], fw_str);
-            free(lines[i]);
-            lines[i] = new_line;
-            continue;
+            char *new_line = (char *)malloc((strlen(current->line) + sizeof(fw_str) + 10) * sizeof(char));
+            if (!new_line) {
+                fprintf(stderr, "Memory allocation failed\n");
+                exit(1);
+            }
+            sprintf(new_line, "%s fw=%s", current->line, fw_str);
+            free(current->line);
+            current->line = new_line;
         }
-
-        double area = 0.0, pj = 0.0;
-        char area_str[100], pj_str[100];
-        bool area_found = false, pj_found = false;
 
         /* Check for 'area' value and convert to double */
-        if (regexec(&regex_area, lines[i], 2, matches, 0) == 0) {
-            area = si_to_double(lines[i] + matches[1].rm_so);
+        if (regexec(&regex_area, current->line, 2, matches, 0) == 0) {
+            area = si_to_double(current->line + matches[1].rm_so);
             area_found = true;
         }
+
         /* Check for 'pj' value and convert to double */
-        if (regexec(&regex_pj, lines[i], 2, matches, 0) == 0) {
-            pj = si_to_double(lines[i] + matches[1].rm_so);
+        if (regexec(&regex_pj, current->line, 2, matches, 0) == 0) {
+            pj = si_to_double(current->line + matches[1].rm_so);
             pj_found = true;
         }
 
         if (area_found && pj_found) {
-            double delta = sqrt(pj * pj / 4 - 4 * area);
-            double l1 = (pj / 2 + delta) / 2;
-            double l2 = (pj / 2 - delta) / 2;
+            double delta = pj * pj - 4 * area;
+            if (delta < 0) {
+                /* If delta is negative, continue to next line */
+                current = current->next;
+                continue;
+            }
+            double delta_sqrt = sqrt(pj * pj / 4 - 4 * area);
+            double l1 = (pj / 2 + delta_sqrt) / 2;
+            double l2 = (pj / 2 - delta_sqrt) / 2;
             double w1, w2;
-
-            char l_str[100], w_str[100];
 
             /* Check if both l1 and l2 are less than or equal to 0 */
             if (l1 <= 0 && l2 <= 0) {
                 /* If both are <= 0, continue to next line */
+                current = current->next;
                 continue;
             }
 
@@ -345,25 +352,30 @@ void process_buffer(char **buffer_ptr, size_t *buffer_size) {
             }
 
             /* Append l and w to the line */
-            size_t line_length = strlen(lines[i]);
-            char *new_line = (char *)malloc((line_length + strlen(l_str) + strlen(w_str) + 10) * sizeof(char));
-            sprintf(new_line, "%s w=%s l=%s", lines[i], w_str, l_str);
-            free(lines[i]);
-            lines[i] = new_line;
+            char *new_line = (char *)malloc((strlen(current->line) + strlen(w_str) + strlen(l_str) + 10) * sizeof(char));
+            if (!new_line) {
+                fprintf(stderr, "Memory allocation failed\n");
+                exit(1);
+            }
+            sprintf(new_line, "%s w=%s l=%s", current->line, w_str, l_str);
+            free(current->line);
+            current->line = new_line;
         }
-    }
 
+        current = current->next;
+    }
+#endif
     /* Join the lines into a buffer */
-    char *result_buffer = join_lines(lines, line_count, buffer_size);
-    free(*buffer_ptr);
+    char *result_buffer = join_lines(head, buffer_size);
+    free_lines(head);
     *buffer_ptr = result_buffer;
 
-    /* Free the allocated memory */
-    free_lines(lines, line_count);
-
+    /* Free the regex structures */
     regfree(&regex_w);
     regfree(&regex_l);
     regfree(&regex_fingers);
+    regfree(&regex_area);
+    regfree(&regex_pj);
 }
 
 int main() {
