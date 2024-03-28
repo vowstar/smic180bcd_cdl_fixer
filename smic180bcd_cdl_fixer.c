@@ -407,9 +407,11 @@ int main() {
 
     /* Read the file into the buffer */
     fread(buffer, 1, length, f);
+    /* Split the buffer into a linked list of lines */
     size_t line_count;
     struct line_node *head = split_buffer(buffer, &line_count);
-    free(buffer);  /* Free the buffer */
+    /* Free the buffer */
+    free(buffer);
 
     /* Prepend param information */
     do {
@@ -471,14 +473,11 @@ int main() {
     /* Process the buffer to calculate cdl parameters */
     process_list(head);
     /* Join the lines into a buffer */
-    char *result_buffer = join_lines(head, &length);
-    buffer = result_buffer;
-    /* Free the linked list */
-    free_lines(head);
-
+    buffer = join_lines(head, &length);
     /* Output buffer to stdout */
     fwrite(buffer, 1, length, stdout);
-
+    /* Free the linked list */
+    free_lines(head);
     /* Free buffer */
     free(buffer);
     return 0;
