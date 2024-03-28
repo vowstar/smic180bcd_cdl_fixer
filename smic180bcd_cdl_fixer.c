@@ -86,6 +86,7 @@ int check_and_prepend(char **buffer, long *length, const char *pattern, const ch
     return 1; /* Success */
 }
 
+#if 0
 /* Function to replace substrings in a dynamic buffer */
 void replace_substrings(char **buffer, const char *patterns[], size_t num_patterns, size_t *buffer_size) {
     size_t original_len = strlen(*buffer);
@@ -150,6 +151,7 @@ void replace_substrings(char **buffer, const char *patterns[], size_t num_patter
     *buffer = result;
     *buffer_size = used;
 }
+#endif
 
 /* Structure for a node in the linked list */
 struct line_node {
@@ -252,8 +254,72 @@ char *join_lines(struct line_node *head, size_t *buffer_size) {
     return buffer;
 }
 
-/* Function to process each line of the buffer */
-void process_buffer(char **buffer_ptr, size_t *buffer_size) {
+/* Helper function to replace all occurrences of a pattern in a string */
+char *str_replace(const char *str, const char *pattern, const char *replacement) {
+    size_t str_len = strlen(str);
+    size_t pattern_len = strlen(pattern);
+    size_t replacement_len = strlen(replacement);
+
+    /* Count the number of occurrences of the pattern */
+    size_t count = 0;
+    const char *tmp = str;
+    while ((tmp = strstr(tmp, pattern))) {
+        count++;
+        tmp += pattern_len;
+    }
+
+    /* Calculate new string length */
+    size_t new_len = str_len + count * (replacement_len - pattern_len);
+
+    /* Allocate memory for the new string */
+    char *result = malloc(new_len + 1);  /* +1 for the null terminator */
+    if (!result) {
+        return NULL;  /* Memory allocation failed */
+    }
+
+    /* Replace each occurrence of the pattern */
+    const char *current = str;
+    char *new_str = result;
+    while ((tmp = strstr(current, pattern))) {
+        size_t len = tmp - current;
+        memcpy(new_str, current, len);  /* Copy characters before the pattern */
+        memcpy(new_str + len, replacement, replacement_len);  /* Copy replacement */
+        current = tmp + pattern_len;
+        new_str += len + replacement_len;
+    }
+    strcpy(new_str, current);  /* Copy the rest of the string */
+
+    return result;
+}
+
+/* Function to replace substrings in each line of the linked list */
+void replace_substrings(struct line_node *head, const char **patterns, size_t pattern_count) {
+    if (!head) {
+        return; /* No operation if list is empty */
+    }
+
+    struct line_node *current = head;
+    while (current) {
+        for (size_t i = 0; i < pattern_count; i += 2) {
+            const char *pattern = patterns[i];
+            const char *replacement = patterns[i + 1];
+
+            char *result = str_replace(current->line, pattern, replacement);
+            if (result) {
+                free(current->line);
+                current->line = result;
+            }
+        }
+        current = current->next;
+    }
+}
+
+/* Function to process each line of the linked list */
+void process_list(struct line_node *head) {
+    if (!head) {
+        return; /* No operation if list is empty */
+    }
+    /* Compile regular expressions for matching */
     regex_t regex_w, regex_l, regex_fingers, regex_area, regex_pj;
     regcomp(&regex_w, "w=([0-9]+\\.?[0-9]*[a-zA-Z]+)", REG_EXTENDED);
     regcomp(&regex_l, "l=([0-9]+\\.?[0-9]*[a-zA-Z]+)", REG_EXTENDED);
@@ -261,11 +327,10 @@ void process_buffer(char **buffer_ptr, size_t *buffer_size) {
     regcomp(&regex_area, "area=([0-9]+\\.?[0-9]*[a-zA-Z]+)", REG_EXTENDED);
     regcomp(&regex_pj, "pj=([0-9]+\\.?[0-9]*[a-zA-Z]+)", REG_EXTENDED);
 
-    size_t line_count = 0;
-    struct line_node *head = split_buffer(*buffer_ptr, &line_count);
     struct line_node *current = head;
-#if 1
+
     while (current) {
+        /* Initialize variables for processing */
         double w = 0.0, l = 0.0, fw, fingers = 1.0;
         double area = 0.0, pj = 0.0;
         char fw_str[100], l_str[100], w_str[100];
@@ -362,13 +427,9 @@ void process_buffer(char **buffer_ptr, size_t *buffer_size) {
             current->line = new_line;
         }
 
+        /* Move to the next line in the list */
         current = current->next;
     }
-#endif
-    /* Join the lines into a buffer */
-    char *result_buffer = join_lines(head, buffer_size);
-    free_lines(head);
-    *buffer_ptr = result_buffer;
 
     /* Free the regex structures */
     regfree(&regex_w);
@@ -489,10 +550,18 @@ int main() {
     };
 
     /* Replace substrings in the buffer */
-    replace_substrings(&buffer, cdl_patterns, sizeof(patterns) / sizeof(patterns[0]), &length);
-
-    /* Process the buffer to calculate fw */
-    process_buffer(&buffer, &length);
+    size_t line_count;
+    struct line_node *head = split_buffer(buffer, &line_count);
+    free(buffer);
+    /* Replace substrings in the linked list */
+    replace_substrings(head, cdl_patterns, sizeof(cdl_patterns) / sizeof(cdl_patterns[0]));
+    /* Process the buffer to calculate cdl parameters */
+    process_list(head);
+    /* Join the lines into a buffer */
+    char *result_buffer = join_lines(head, &length);
+    buffer = result_buffer;
+    /* Free the linked list */
+    free_lines(head);
 
     /* Output buffer to stdout */
     fwrite(buffer, 1, length, stdout);
