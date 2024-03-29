@@ -425,8 +425,8 @@ int main() {
     }
     while (0);
 
-    /* Define patterns and corresponding strings to prepend, in reverse order */
-    const char *patterns[] = {
+    /* Define cdl_parameter_patterns and corresponding strings to prepend, in reverse order */
+    const char *cdl_param_patterns[] = {
         "^\\.PARAM.*\n", ".PARAM",
         "^\\*\\.MEGA.*\n", "*.MEGA",
         "^\\*\\.EQUATION.*\n", "*.EQUATION",
@@ -438,8 +438,8 @@ int main() {
     };
 
     /* Check and prepend strings if necessary */
-    for (size_t i = 0; i < sizeof(patterns) / sizeof(patterns[0]); i += 2) {
-        check_and_prepend(&head, patterns[i], patterns[i + 1]);
+    for (size_t i = 0; i < sizeof(cdl_param_patterns) / sizeof(cdl_param_patterns[0]); i += 2) {
+        check_and_prepend(&head, cdl_param_patterns[i], cdl_param_patterns[i + 1]);
     }
 
     /* Prepend header information */
@@ -455,8 +455,8 @@ int main() {
     }
     while (0);
 
-    /* Define CDL patterns and their replacements */
-    const char *cdl_patterns[] = {
+    /* Define cdl_case_patterns and their replacements */
+    const char *cdl_case_patterns[] = {
         " W=", " w=",
         " L=", " l=",
         " AREA=", " area=",
@@ -469,7 +469,7 @@ int main() {
     };
 
     /* Replace substrings in the linked list */
-    replace_substrings(head, cdl_patterns, sizeof(cdl_patterns) / sizeof(cdl_patterns[0]));
+    replace_substrings(head, cdl_case_patterns, sizeof(cdl_case_patterns) / sizeof(cdl_case_patterns[0]));
     /* Process the buffer to calculate cdl parameters */
     process_list(head);
     /* Join the lines into a buffer */
