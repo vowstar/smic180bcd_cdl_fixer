@@ -389,7 +389,7 @@ void process_list(struct line_node *head) {
     regfree(&regex_pj);
 }
 
-int main() {
+int main(int argc, const char *argv[]) {
     char *buffer;
     long length;
     FILE *file_in = stdin;
@@ -404,15 +404,29 @@ int main() {
     const char *output = NULL;
 
     struct argparse_option options[] = {
+        OPT_HELP(),
+        OPT_GROUP("Basic options"),
+        OPT_STRING('i', "input", &input, "input file", NULL, 0, 0),
+        OPT_STRING('o', "output", &output, "output file", NULL, 0, 0),
         OPT_GROUP("Additional options"),
         OPT_BOOLEAN(0, "no-param", &no_param, "disable param", NULL, 0, 0),
         OPT_BOOLEAN(0, "no-case-conversion", &no_case_conversion, "disable case conversion", NULL, 0, 0),
         OPT_BOOLEAN(0, "no-calc-data", &no_calc_data, "disable data calculation", NULL, 0, 0),
         OPT_STRING(0, "soc-module", &soc_module, "specify SOC module", NULL, 0, 0),
-        OPT_STRING(0, "input", &input, "input file", NULL, 0, 0),
-        OPT_STRING(0, "output", &output, "output file", NULL, 0, 0),
         OPT_END(),
     };
+
+    static const char *const usages[] = {
+        "smic180bcd_cdl_fixer < input.cdl > output.cdl",
+        "smic180bcd_cdl_fixer --input input.cdl --output output.cdl",
+        "smic180bcd_cdl_fixer --input input.cdl --output output.cdl --soc-module example.soc_mod",
+        NULL,
+    };
+
+    struct argparse argparse;
+    argparse_init(&argparse, options, usages, 0);
+    argparse_describe(&argparse, "Fix smic180bcd cdl netlist for ic618 spiceIn", NULL);
+    argc = argparse_parse(&argparse, argc, argv);
 
     /* Process input file path */
     if (input != NULL) {
