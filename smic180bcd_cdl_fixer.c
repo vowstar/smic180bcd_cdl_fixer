@@ -14,6 +14,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "argparse.h"
+
 /* Converts an SI unit string to a double */
 double si_to_double(const char *si_str) {
     double value;
@@ -390,12 +392,50 @@ void process_list(struct line_node *head) {
 int main() {
     char *buffer;
     long length;
-    FILE *f = stdin;
+    FILE *file_in = stdin;
+    FILE *file_out = stdout;
+
+    /* Defile argparse variables */
+    int no_param = 0;
+    int no_case_conversion = 0;
+    int no_calc_data = 0;
+    const char *soc_module = NULL;
+    const char *input = NULL;
+    const char *output = NULL;
+
+    struct argparse_option options[] = {
+        OPT_GROUP("Additional options"),
+        OPT_BOOLEAN(0, "no-param", &no_param, "disable param", NULL, 0, 0),
+        OPT_BOOLEAN(0, "no-case-conversion", &no_case_conversion, "disable case conversion", NULL, 0, 0),
+        OPT_BOOLEAN(0, "no-calc-data", &no_calc_data, "disable data calculation", NULL, 0, 0),
+        OPT_STRING(0, "soc-module", &soc_module, "specify SOC module", NULL, 0, 0),
+        OPT_STRING(0, "input", &input, "input file", NULL, 0, 0),
+        OPT_STRING(0, "output", &output, "output file", NULL, 0, 0),
+        OPT_END(),
+    };
+
+    /* Process input file path */
+    if (input != NULL) {
+        file_in = fopen(input, "r");
+        if (!file_in) {
+            fprintf(stderr, "Failed to open file: %s\n", input);
+            return 1;
+        }
+    }
+
+    /* Process output file path */
+    if (output != NULL) {
+        file_out = fopen(output, "w");
+        if (!file_out) {
+            fprintf(stderr, "Failed to open file: %s\n", output);
+            return 1;
+        }
+    }
 
     /* Seek to the end of the file to get length */
-    fseek(f, 0, SEEK_END);
-    length = ftell(f);
-    fseek(f, 0, SEEK_SET);
+    fseek(file_in, 0, SEEK_END);
+    length = ftell(file_in);
+    fseek(file_in, 0, SEEK_SET);
 
     /* Allocate memory for the buffer */
     buffer = (char *)malloc(length);
@@ -406,7 +446,7 @@ int main() {
     memset(buffer, 0, length);
 
     /* Read the file into the buffer */
-    fread(buffer, 1, length, f);
+    fread(buffer, 1, length, file_in);
     /* Split the buffer into a linked list of lines */
     size_t line_count;
     struct line_node *head = split_buffer(buffer, &line_count);
@@ -425,21 +465,23 @@ int main() {
     }
     while (0);
 
-    /* Define cdl_parameter_patterns and corresponding strings to prepend, in reverse order */
-    const char *cdl_param_patterns[] = {
-        "^\\.PARAM.*\n", ".PARAM",
-        "^\\*\\.MEGA.*\n", "*.MEGA",
-        "^\\*\\.EQUATION.*\n", "*.EQUATION",
-        "^\\*\\.DIOAREA.*\n", "*.DIOAREA",
-        "^\\*\\.DIOPERI.*\n", "*.DIOPERI",
-        "^\\*\\.CAPVAL.*\n", "*.CAPVAL",
-        "^\\*\\.RESVAL.*\n", "*.RESVAL",
-        "^\\*\\.BIPOLAR.*\n", "*.BIPOLA",
-    };
+    if (!no_param) {
+        /* Define cdl_parameter_patterns and corresponding strings to prepend, in reverse order */
+        const char *cdl_param_patterns[] = {
+            "^\\.PARAM.*\n", ".PARAM",
+            "^\\*\\.MEGA.*\n", "*.MEGA",
+            "^\\*\\.EQUATION.*\n", "*.EQUATION",
+            "^\\*\\.DIOAREA.*\n", "*.DIOAREA",
+            "^\\*\\.DIOPERI.*\n", "*.DIOPERI",
+            "^\\*\\.CAPVAL.*\n", "*.CAPVAL",
+            "^\\*\\.RESVAL.*\n", "*.RESVAL",
+            "^\\*\\.BIPOLAR.*\n", "*.BIPOLA",
+        };
 
-    /* Check and prepend strings if necessary */
-    for (size_t i = 0; i < sizeof(cdl_param_patterns) / sizeof(cdl_param_patterns[0]); i += 2) {
-        check_and_prepend(&head, cdl_param_patterns[i], cdl_param_patterns[i + 1]);
+        /* Check and prepend strings if necessary */
+        for (size_t i = 0; i < sizeof(cdl_param_patterns) / sizeof(cdl_param_patterns[0]); i += 2) {
+            check_and_prepend(&head, cdl_param_patterns[i], cdl_param_patterns[i + 1]);
+        }
     }
 
     /* Prepend header information */
@@ -455,23 +497,29 @@ int main() {
     }
     while (0);
 
-    /* Define cdl_case_patterns and their replacements */
-    const char *cdl_case_patterns[] = {
-        " W=", " w=",
-        " L=", " l=",
-        " AREA=", " area=",
-        " PJ=", " pj=",
-        " M=", " m=",
-        " FW=", " fw=",
-        " C=", " c=",
-        " R=", " r=",
-        " FINGERS=", " fingers=",
-    };
+    if (!no_case_conversion) {
+        /* Define cdl_case_patterns and their replacements */
+        const char *cdl_case_patterns[] = {
+            " W=", " w=",
+            " L=", " l=",
+            " AREA=", " area=",
+            " PJ=", " pj=",
+            " M=", " m=",
+            " FW=", " fw=",
+            " C=", " c=",
+            " R=", " r=",
+            " FINGERS=", " fingers=",
+        };
 
-    /* Replace substrings in the linked list */
-    replace_substrings(head, cdl_case_patterns, sizeof(cdl_case_patterns) / sizeof(cdl_case_patterns[0]));
-    /* Process the buffer to calculate cdl parameters */
-    process_list(head);
+        /* Replace substrings in the linked list */
+        replace_substrings(head, cdl_case_patterns, sizeof(cdl_case_patterns) / sizeof(cdl_case_patterns[0]));
+    }
+
+    if (!no_calc_data) {
+        /* Process the buffer to calculate cdl parameters */
+        process_list(head);
+    }
+
     /* Join the lines into a buffer */
     buffer = join_lines(head, &length);
     /* Output buffer to stdout */
@@ -480,5 +528,14 @@ int main() {
     free_lines(head);
     /* Free buffer */
     free(buffer);
+    /* Close input file */
+    if (file_in != stdin) {
+        fclose(file_in);
+    }
+    /* Close output file */
+    if (file_out != stdout) {
+        fclose(file_out);
+    }
+
     return 0;
 }
