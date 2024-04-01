@@ -7,6 +7,7 @@
  *
  */
 
+#include <ctype.h>
 #include <math.h>
 #include <regex.h>
 #include <stdbool.h>
@@ -15,6 +16,29 @@
 #include <string.h>
 
 #include "argparse.h"
+
+#define MAX_LINE_LENGTH (4096)
+#define MAX_NAME_LENGTH (128)
+
+/* Structure for a node in the linked list */
+struct line_node {
+    char *line;              /* Pointer to the string */
+    struct line_node *next;  /* Pointer to the next node */
+};
+
+/* Linked list structure for port information */
+struct port_node {
+    char *port_name;         /* Name of the port */
+    char direction;          /* 'I': in, 'O': out, 'B': inout */
+    struct port_node *next;  /* Pointer to the next node */
+};
+
+/* Linked list structure for module information */
+struct module_node {
+    char *module_name;       /* Name of the module */
+    struct port_node *ports; /* Linked list of port information */
+    struct module_node *next;/* Pointer to the next node */
+};
 
 /* Converts an SI unit string to a double */
 double si_to_double(const char *si_str) {
@@ -65,12 +89,6 @@ void double_to_si(double value, char *si_str, size_t max_len) {
     /* Fallback to simple decimal representation if no unit fits */
     snprintf(si_str, max_len, "%g", value);
 }
-
-/* Structure for a node in the linked list */
-struct line_node {
-    char *line;              /* Pointer to the string */
-    struct line_node *next;  /* Pointer to the next node */
-};
 
 /* Function to free the memory allocated for the linked list */
 void free_lines(struct line_node *head) {
@@ -283,7 +301,7 @@ void process_list(struct line_node *head) {
         /* Initialize variables for processing */
         double w = 0.0, l = 0.0, fw, fingers = 1.0;
         double area = 0.0, pj = 0.0;
-        char fw_str[100], l_str[100], w_str[100];
+        char fw_str[MAX_NAME_LENGTH], l_str[MAX_NAME_LENGTH], w_str[MAX_NAME_LENGTH];
         bool w_found = false, l_found = false, fingers_found = false;
         bool area_found = false, pj_found = false;
 
@@ -389,6 +407,150 @@ void process_list(struct line_node *head) {
     regfree(&regex_pj);
 }
 
+/**
+ * Function to parse the input.soc_mod file and create a linked list of module information.
+ * This function dynamically allocates memory for module_node and port_node structures.
+ * It returns the head of the module linked list.
+ */
+struct module_node* parse_soc_mod_file(const char *filename) {
+    FILE *file = fopen(filename, "r");
+    if (!file) {
+        fprintf(stderr, "Failed to open file");
+        return NULL;
+    }
+
+    char line[MAX_LINE_LENGTH];
+    struct module_node *modules_head = NULL;
+    struct module_node *current_module = NULL;
+    char current_port_name[MAX_NAME_LENGTH];
+
+    while (fgets(line, sizeof(line), file)) {
+        if (line[0] == '\n' || line[0] == '#') continue; /* Skip empty lines and comments */
+        char *trimmed_line = line;
+        while (isspace((unsigned char)*trimmed_line)) trimmed_line++; /* Trim leading whitespace */
+
+        if (trimmed_line[0] != ' ') {
+            /* New module starts */
+            struct module_node *new_module = malloc(sizeof(struct module_node));
+            new_module->module_name = strdup(trimmed_line);
+            new_module->ports = NULL;
+            new_module->next = NULL;
+
+            char *newline = strchr(new_module->module_name, '\n');
+            if (newline) *newline = '\0'; /* Remove newline character */
+
+            if (current_module) {
+                current_module->next = new_module;
+            } else {
+                modules_head = new_module;
+            }
+            current_module = new_module;
+        } else if (strstr(trimmed_line, "direction:")) {
+            /* Parse port direction */
+            char direction[10];
+            sscanf(trimmed_line, " direction: %s", direction);
+            char dir_char = 'B'; /* Default to 'B' for inout */
+            if (strcmp(direction, "in") == 0) {
+                dir_char = 'I';
+            } else if (strcmp(direction, "out") == 0) {
+                dir_char = 'O';
+            }
+
+            /* Save port information */
+            struct port_node *new_port = malloc(sizeof(struct port_node));
+            new_port->port_name = strdup(current_port_name);
+            new_port->direction = dir_char;
+            new_port->next = current_module->ports;
+            current_module->ports = new_port;
+        } else {
+            /* Parse port name */
+            sscanf(trimmed_line, " %49s", current_port_name); /* Read port name */
+        }
+    }
+
+    fclose(file);
+    return modules_head;
+}
+
+/**
+ * Function to free a linked list of port nodes.
+ * This function will iterate through the list of port_node and free each node.
+ * @param ports Pointer to the head of the port_node list.
+ */
+void free_ports(struct port_node *ports) {
+    struct port_node *current_port = ports;
+    while (current_port) {
+        struct port_node *next_port = current_port->next;
+        free(current_port->port_name);  // Free the dynamically allocated port name
+        free(current_port);             // Free the port node itself
+        current_port = next_port;       // Move to the next port node
+    }
+}
+
+/**
+ * Function to free a linked list of module nodes.
+ * This function will iterate through the list of module_node and free each node,
+ * along with its associated ports by calling free_ports.
+ * @param modules Pointer to the head of the module_node list.
+ */
+void free_modules(struct module_node *modules) {
+    struct module_node *current_module = modules;
+    while (current_module) {
+        struct module_node *next_module = current_module->next;
+        free(current_module->module_name);  // Free the dynamically allocated module name
+        free_ports(current_module->ports);   // Free the linked list of ports
+        free(current_module);               // Free the module node itself
+        current_module = next_module;       // Move to the next module node
+    }
+}
+
+/**
+ * Function to insert or update *.PININFO line after .SUBCKT line in the linked list.
+ * It searches for .SUBCKT lines, extracts the module name, and then adds or updates
+ * the *.PININFO line based on the module information in the module_node linked list.
+ */
+void insert_pininfo(struct line_node *head, struct module_node *modules) {
+    while (head && head->next) {
+        if (strncmp(head->line, ".SUBCKT", 7) == 0) {
+            char module_name[MAX_NAME_LENGTH];  /* Assuming a max module name length of 127 */
+            char format_string[20];
+            snprintf(format_string, sizeof(format_string), "%%%ds", MAX_NAME_LENGTH - 1);
+            sscanf(head->line + 7, format_string, module_name);  /* Extract module name */
+
+            /* Find corresponding module information */
+            struct module_node *current_module = modules;
+            while (current_module) {
+                if (strcmp(current_module->module_name, module_name) == 0) {
+                    /* Match found, build the *.PININFO line */
+                    char pininfo_line[MAX_LINE_LENGTH] = "*.PININFO";  /* Start building PININFO line */
+                    struct port_node *current_port = current_module->ports;
+                    while (current_port) {
+                        char port_info[MAX_NAME_LENGTH];
+                        sprintf(port_info, " %s:%c", current_port->port_name, current_port->direction);
+                        strcat(pininfo_line, port_info);
+                        current_port = current_port->next;
+                    }
+
+                    /* Check if next line is already a PININFO line */
+                    if (head->next && strncmp(head->next->line, "*.PININFO", 9) == 0) {
+                        free(head->next->line);  /* Free the existing line */
+                        head->next->line = strdup(pininfo_line);  /* Replace with new line */
+                    } else {
+                        /* Insert new PININFO line */
+                        struct line_node *new_node = malloc(sizeof(struct line_node));
+                        new_node->line = strdup(pininfo_line);
+                        new_node->next = head->next;
+                        head->next = new_node;
+                    }
+                    break;  /* Exit loop after processing */
+                }
+                current_module = current_module->next;
+            }
+        }
+        head = head->next;
+    }
+}
+
 int main(int argc, const char *argv[]) {
     char *buffer;
     long length;
@@ -412,7 +574,7 @@ int main(int argc, const char *argv[]) {
         OPT_BOOLEAN(0, "no-param", &no_param, "disable param", NULL, 0, 0),
         OPT_BOOLEAN(0, "no-case-conversion", &no_case_conversion, "disable case conversion", NULL, 0, 0),
         OPT_BOOLEAN(0, "no-calc-data", &no_calc_data, "disable data calculation", NULL, 0, 0),
-        OPT_STRING(0, "soc-module", &soc_module, "specify SOC module", NULL, 0, 0),
+        OPT_STRING('m', "soc-module", &soc_module, "specify SOC module", NULL, 0, 0),
         OPT_END(),
     };
 
@@ -534,10 +696,21 @@ int main(int argc, const char *argv[]) {
         process_list(head);
     }
 
+    if (soc_module) {
+        /* Parse the SOC module file */
+        struct module_node *modules_head = parse_soc_mod_file(soc_module);
+        if (modules_head) {
+            /* Insert or update PININFO lines */
+            insert_pininfo(head, modules_head);
+            /* Free module information */
+            free_modules(modules_head);
+        }
+    }
+
     /* Join the lines into a buffer */
     buffer = join_lines(head, &length);
-    /* Output buffer to stdout */
-    fwrite(buffer, 1, length, stdout);
+    /* Output buffer to file_out */
+    fwrite(buffer, 1, length, file_out);
     /* Free the linked list */
     free_lines(head);
     /* Free buffer */
