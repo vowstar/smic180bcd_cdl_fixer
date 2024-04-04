@@ -500,7 +500,13 @@ struct module_node* parse_soc_mod_file(const char *filename) {
 
             /* Set the direction of the last port node */
             if (last_port) {
-                last_port->direction = (direction[0] == 'i' ? 'I' : (direction[0] == 'o' ? 'O' : 'B'));
+                if (strncmp(direction, "inout", strlen("inout")) == 0) {
+                    last_port->direction = 'B';
+                } else if (strncmp(direction, "in", strlen("in")) == 0) {
+                    last_port->direction = 'I';
+                } else if (strncmp(direction, "out", strlen("out")) == 0) {
+                    last_port->direction = 'O';
+                }
             }
         }
     }
